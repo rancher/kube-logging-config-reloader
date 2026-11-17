@@ -1,4 +1,4 @@
-FROM golang:1.23.1 as builder
+FROM registry.rancher.com/rancher/appco-go:1.27.4 AS builder
 
 WORKDIR /workspace
 
@@ -18,9 +18,7 @@ COPY /cmd/configreloader/main.go main.go
 # Build
 RUN CGO_ENABLED=0 go build -a -o config-reloader main.go
 
-# Use distroless as minimal base image to package the manager binary
-# Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM gcr.io/distroless/static:latest
+FROM registry.suse.com/bci/bci-nano:15.7
 
 WORKDIR /
 
