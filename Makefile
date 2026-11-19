@@ -1,34 +1,47 @@
-BIN := ${PWD}/bin
-export PATH := ${BIN}:${PATH}
+DEFAULT_PLATFORMS := linux/amd64,linux/arm64
+TARGET_PLATFORMS ?= $(DEFAULT_PLATFORMS)
 
-LICENSEI := ${BIN}/licensei
-LICENSEI_VERSION = v0.4.0
+REPO ?= rancher
+IMAGE ?= kube-logging-config-reloader
+IMAGE_NAME = $(REPO)/$(IMAGE)
+FULL_IMAGE_TAG = $(IMAGE_NAME):$(TAG)
+BUILD_ACTION = --load
 
-${BIN}:
-	mkdir -p ${BIN}
+RUNNER := docker
+IMAGE_BUILDER := $(RUNNER) buildx
+MACHINE ?= rancher
 
-.PHONY: license-check
-license-check: ${LICENSEI} ## Run license check
-	${LICENSEI} check
-	${LICENSEI} header
+.DEFAULT_GOAL := ci
 
-.PHONY: license-cache
-license-cache: ${LICENSEI} ## Generate license cache
-	${LICENSEI} cache
+.PHONY: all
+all: ci
 
-.PHONY: check
-check: license-cache license-check
+.PHONY: test
+test:
+	go test -v ./...
 
-${LICENSEI}: ${LICENSEI}_${LICENSEI_VERSION} | ${BIN}
-	ln -sf $(notdir $<) $@
+.PHONY: build
+build:
+	CGO_ENABLED=0 go build -v -o bin/config-reloader ./cmd/configreloader/main.go
 
-${LICENSEI}_${LICENSEI_VERSION}: IMPORT_PATH := github.com/goph/licensei/cmd/licensei
-${LICENSEI}_${LICENSEI_VERSION}: VERSION := ${LICENSEI_VERSION}
-${LICENSEI}_${LICENSEI_VERSION}: | ${BIN}
-	${go_install_binary}
+.PHONY: ci
+ci: test build
 
-define go_install_binary
-find ${BIN} -name '$(notdir ${IMPORT_PATH})_*' -exec rm {} +
-GOBIN=${BIN} go install ${IMPORT_PATH}@${VERSION}
-mv ${BIN}/$(notdir ${IMPORT_PATH}) ${BIN}/$(notdir ${IMPORT_PATH})_${VERSION}
-endef
+.PHONY: buildx-machine
+buildx-machine:
+	@docker buildx ls | grep $(MACHINE) || \
+		docker buildx create --name=$(MACHINE) --platform=$(DEFAULT_PLATFORMS)
+
+.PHONY: build-image
+build-image: buildx-machine
+	$(IMAGE_BUILDER) build -f Dockerfile \
+		--builder $(MACHINE) $(IMAGE_ARGS) \
+		--build-arg VERSION=$(VERSION) --platform=$(TARGET_PLATFORMS) -t "$(FULL_IMAGE_TAG)" $(BUILD_ACTION) .
+	@echo "Built $(FULL_IMAGE_TAG)"
+
+.PHONY: push-image
+push-image: buildx-machine
+	$(IMAGE_BUILDER) build -f Dockerfile \
+		--builder $(MACHINE) $(IMAGE_ARGS) $(IID_FILE_FLAG) $(BUILDX_ARGS) \
+		--build-arg VERSION=$(VERSION) --platform=$(TARGET_PLATFORMS) -t "$(FULL_IMAGE_TAG)" --push .
+	@echo "Pushed $(FULL_IMAGE_TAG)"
